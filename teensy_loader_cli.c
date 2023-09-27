@@ -42,7 +42,17 @@ void usage(const char *err)
 {
 	if(err != NULL) fprintf(stderr, "%s\n\n", err);
 	fprintf(stderr,
-		"Usage: teensy_loader_cli --mcu=<MCU> [-w] [-h] [-n] [-b] [-v] <file.hex>\n"
+		"Usage (upload to first teensy): \n"
+		"\t $ teensy_loader_cli --mcu=<MCU> [-w] [-h] [-n] [-b] [-v] <file.hex>\n"
+		"Usage (upload to teensy on bus:dev)(linux only):\n"
+		"\n"
+		"\t $ teensy_loader_cli --mcu=<MCU> --bus=<USB BUS> --dev=<USB DEVICE> [-w] [-h] [-n] [-b] [-v] <file.hex>\n"
+		"\n"
+		"Usage (upload to teensy on /serial/port)(linux only):\n"
+                "\t $ ./get_dev_and_bus.sh /serial/port\n"
+		"\t output = /dev/bus/usb/<BUS>/<DEV>\n"
+		"\t $ teensy_loader_cli --mcu=<MCU> --dev=<DEV> --bus=<BUS> [-w] [-h] [-n] [-b] [-v] <file.hex>\n"
+		"\n"
 		"\t-w : Wait for device to appear\n"
 		"\t-r : Use hard reboot if device not online\n"
 		"\t-s : Use soft reboot if device not online (Teensy 3.x & 4.x)\n"
@@ -50,7 +60,8 @@ void usage(const char *err)
 		"\t-b : Boot only, do not program\n"
 		"\t-v : Verbose output\n"
 		"\nUse `teensy_loader_cli --list-mcus` to list supported MCUs.\n"
-		"\nUse `teensy_loader_cli --list-teensy` to list attached teensies.\n"
+		"Use `teensy_loader_cli --list-teensy` to list attached teensies.\n"
+		"Use `teensy_loader_cli --reboot` to only soft reboot the teensy.\n"
 		"\nFor more information, please visit:\n"
 		"http://www.pjrc.com/teensy/loader_cli.html\n");
 	exit(1);
@@ -88,7 +99,7 @@ int boot_only = 0;
 int code_size = 0, block_size = 0;
 const char *filename=NULL;
 int FLAG_LIST_TEENSY=0;
-
+int FLAG_DO_SOFT_REBOOT=0;
 int BUS = -1;
 int DEV = -1;
 
@@ -115,6 +126,12 @@ int main(int argc, char **argv)
            printf("--------- List of Teensies--------\n");
            printf("----------------------------------\n");
            teensy_list();
+        }
+
+        if (FLAG_DO_SOFT_REBOOT==1)
+        {
+           printf("Soft Rebooting then exiting\n");
+           soft_reboot();
         }
 	else if (!filename && !boot_only) {
 		usage("Filename must be specified");
@@ -353,7 +370,8 @@ int teensy_list(void)
 int teensy_open(void)
 {
 	teensy_close();
-	libusb_teensy_handle = open_usb_device(0x16C0, 0x0478);
+	libusb_teensy_handle = open_usb_device(0x16C0, 0x0483);
+	//libusb_teensy_handle = open_usb_device(0x16C0, 0x0478);
 	if (libusb_teensy_handle) return 1;
 	return 0;
 }
@@ -1243,6 +1261,7 @@ void parse_options(int argc, char **argv)
 				else if(strcasecmp(name, "bus") == 0) BUS=atoi(val);
 				else if(strcasecmp(name, "list-teensy") == 0) FLAG_LIST_TEENSY=1;
 				else if(strcasecmp(name, "list-mcus") == 0) list_mcus();
+				else if(strcasecmp(name, "reboot") == 0) FLAG_DO_SOFT_REBOOT=1;
 				else {
 					fprintf(stderr, "Unknown option \"%s\"\n\n", arg);
 					usage(NULL);
