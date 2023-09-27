@@ -3,6 +3,10 @@
  * http://www.pjrc.com/teensy/loader_cli.html
  * Copyright 2008-2016, PJRC.COM, LLC
  *
+ * Modified by Daniel M. Lofaro 
+ * dan (at) danLofaro (dot) com
+ * 27 Sept 2023
+ *
  * You may redistribute this program and/or modify it under the terms
  * of the GNU General Public License as published by the Free Software
  * Foundation, version 3 of the License.
@@ -26,6 +30,7 @@
  */
 
 
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -45,6 +50,7 @@ void usage(const char *err)
 		"\t-b : Boot only, do not program\n"
 		"\t-v : Verbose output\n"
 		"\nUse `teensy_loader_cli --list-mcus` to list supported MCUs.\n"
+		"\nUse `teensy_loader_cli --list-teensy` to list attached teensies.\n"
 		"\nFor more information, please visit:\n"
 		"http://www.pjrc.com/teensy/loader_cli.html\n");
 	exit(1);
@@ -56,6 +62,8 @@ int teensy_write(void *buf, int len, double timeout);
 void teensy_close(void);
 int hard_reboot(void);
 int soft_reboot(void);
+int teensy_list(void);
+int list_usb_device(int vid, int pid);
 
 // Intel Hex File Functions
 int read_intel_hex(const char *filename);
@@ -79,13 +87,18 @@ int verbose = 0;
 int boot_only = 0;
 int code_size = 0, block_size = 0;
 const char *filename=NULL;
+int FLAG_LIST_TEENSY=0;
 
+int BUS = -1;
+int DEV = -1;
 
 /****************************************************************/
 /*                                                              */
 /*                       Main Program                           */
 /*                                                              */
 /****************************************************************/
+
+
 
 int main(int argc, char **argv)
 {
@@ -96,7 +109,14 @@ int main(int argc, char **argv)
 
 	// parse command line arguments
 	parse_options(argc, argv);
-	if (!filename && !boot_only) {
+        if (FLAG_LIST_TEENSY == 1)
+        {
+           printf("----------------------------------\n");
+           printf("--------- List of Teensies--------\n");
+           printf("----------------------------------\n");
+           teensy_list();
+        }
+	else if (!filename && !boot_only) {
 		usage("Filename must be specified");
 	}
 	if (!code_size) {
@@ -226,6 +246,36 @@ int main(int argc, char **argv)
 
 // http://libusb.sourceforge.net/doc/index.html
 #include <usb.h>
+int list_usb_device(int vid, int pid)
+{
+	struct usb_bus *bus;
+	struct usb_device *dev;
+	//char buf[128];
+        int ret = 1;
+
+	usb_init();
+	usb_find_busses();
+	usb_find_devices();
+        int num_dev = 0;
+	//printf_verbose("\nSearching for USB device:\n");
+	for (bus = usb_get_busses(); bus; bus = bus->next) {
+		for (dev = bus->devices; dev; dev = dev->next) {
+                        /* Print USB Bus */
+			//printf_verbose("bus \"%s\", device \"%s\" vid=%04X, pid=%04X\n",
+                    if( (vid == dev->descriptor.idVendor) & (pid == dev->descriptor.idProduct) )
+                    {
+			printf("bus \"%s\", device \"%s\" vid=%04X, pid=%04X\n",
+				bus->dirname, dev->filename,
+				dev->descriptor.idVendor,
+				dev->descriptor.idProduct
+			);
+                        num_dev += 1;
+                    }
+                }
+        }
+        if( num_dev > 0 ) ret = 0;
+        return ret;
+}
 
 usb_dev_handle * open_usb_device(int vid, int pid)
 {
@@ -241,13 +291,20 @@ usb_dev_handle * open_usb_device(int vid, int pid)
 	//printf_verbose("\nSearching for USB device:\n");
 	for (bus = usb_get_busses(); bus; bus = bus->next) {
 		for (dev = bus->devices; dev; dev = dev->next) {
-			//printf_verbose("bus \"%s\", device \"%s\" vid=%04X, pid=%04X\n",
-			//	bus->dirname, dev->filename,
-			//	dev->descriptor.idVendor,
-			//	dev->descriptor.idProduct
-			//);
+                        /* Print USB Bus */
+			printf_verbose("bus \"%s\", device \"%s\" vid=%04X, pid=%04X\n",
+				bus->dirname, dev->filename,
+				dev->descriptor.idVendor,
+				dev->descriptor.idProduct
+			);
+                   
 			if (dev->descriptor.idVendor != vid) continue;
 			if (dev->descriptor.idProduct != pid) continue;
+                        if ( (DEV >= 0) & (BUS >= 0) )
+                        {
+                           if( (BUS != atoi(bus->dirname)) | (DEV != atoi(dev->filename)) ) continue;
+                        }
+
 			h = usb_open(dev);
 			if (!h) {
 				printf_verbose("Found device but unable to open\n");
@@ -283,6 +340,15 @@ usb_dev_handle * open_usb_device(int vid, int pid)
 }
 
 static usb_dev_handle *libusb_teensy_handle = NULL;
+
+int teensy_list(void)
+{
+	teensy_close();
+	list_usb_device(0x16C0, 0x0483);
+	//list_usb_device(0x16C0, 0x0478);
+	if (libusb_teensy_handle) return 1;
+	return 0;
+}
 
 int teensy_open(void)
 {
@@ -372,6 +438,11 @@ int soft_reboot(void)
 #include <setupapi.h>
 #include <ddk/hidsdi.h>
 #include <ddk/hidclass.h>
+
+HANDLE open_usb_device(int vid, int pid, int dev)
+{
+  return open_usb_device(vid, pid);
+}
 
 HANDLE open_usb_device(int vid, int pid)
 {
@@ -1168,6 +1239,9 @@ void parse_options(int argc, char **argv)
 
 				if(strcasecmp(name, "help") == 0) usage(NULL);
 				else if(strcasecmp(name, "mcu") == 0) read_mcu(val);
+				else if(strcasecmp(name, "dev") == 0) DEV=atoi(val);
+				else if(strcasecmp(name, "bus") == 0) BUS=atoi(val);
+				else if(strcasecmp(name, "list-teensy") == 0) FLAG_LIST_TEENSY=1;
 				else if(strcasecmp(name, "list-mcus") == 0) list_mcus();
 				else {
 					fprintf(stderr, "Unknown option \"%s\"\n\n", arg);
